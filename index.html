@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🔮 손금 해석 · Palm Reading</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Nanum+Myeongjo:wght@400;700&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { min-height: 100vh; background: #0a0710; }
+    @keyframes float {
+      0%, 100% { transform: translateY(0px) rotate(0deg); opacity: 0.3; }
+      50% { transform: translateY(-20px) rotate(180deg); opacity: 0.8; }
+    }
+    @keyframes shimmer {
+      0% { background-position: -200% center; }
+      100% { background-position: 200% center; }
+    }
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 20px rgba(212,175,55,0.3); }
+      50% { box-shadow: 0 0 40px rgba(212,175,55,0.7), 0 0 60px rgba(212,175,55,0.3); }
+    }
+    @keyframes spin-slow {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .orb { animation: pulse-glow 3s ease-in-out infinite; }
+    .upload-zone:hover { border-color: #d4af37 !important; background: rgba(212,175,55,0.05) !important; }
+    .analyze-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(212,175,55,0.5) !important; }
+    .analyze-btn:active:not(:disabled) { transform: translateY(0); }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #1a1525; }
+    ::-webkit-scrollbar-thumb { background: #d4af37; border-radius: 2px; }
+    .api-input { background: rgba(15,8,30,0.9); border: 1px solid #3d2d5e; border-radius: 10px; padding: 0.7rem 1rem; color: #d4c5a0; font-family: monospace; font-size: 0.85rem; width: 100%; outline: none; transition: border 0.3s; }
+    .api-input:focus { border-color: #d4af37; }
+    .particle { position: fixed; border-radius: 50%; pointer-events: none; z-index: 0; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useRef, useCallback, useEffect } = React;
+
+    const SYSTEM_PROMPT = `당신은 수십 년 경력의 손금 전문 해석가입니다. 사용자가 보내준 손바닥 사진을 분석하여 손금을 해석해 주세요.
+
+다음 항목들을 순서대로 분석하되, 실제로 사진에서 보이는 선을 기준으로 구체적이고 흥미롭게 해석해 주세요:
+
+1. 🌿 **생명선 (Life Line)** - 활력, 건강, 삶의 전환점
+2. 🧠 **두뇌선 (Head Line)** - 사고방식, 지적 성향, 의사결정 스타일
+3. ❤️ **감정선 (Heart Line)** - 감정표현, 연애관, 대인관계
+4. ⭐ **운명선 (Fate Line)** - 직업운, 커리어 흐름 (없을 수도 있음)
+5. ☀️ **태양선 (Sun Line)** - 성공운, 명예, 창의성 (없을 수도 있음)
+6. 🔮 **종합 메시지** - 전체적인 인생의 흐름과 조언
+
+각 항목을 2~3문장으로 간결하고 통찰력 있게 서술해 주세요.
+마지막에 "⚠️ 이 해석은 재미와 참고용입니다" 문구를 추가해 주세요.
+한국어로 답변해 주세요.`;
+
+    // 파티클 생성
+    const particles = Array.from({ length: 20 }, (_, i) => ({
+      id: i,
+      size: Math.random() * 3 + 1,
+      opacity: Math.random() * 0.4 + 0.1,
+      left: Math.random() * 100,
+      top: Math.random() * 100,
+      duration: Math.random() * 6 + 4,
+      delay: Math.random() * 4,
+    }));
+
+    function App() {
+      const [apiKey, setApiKey] = useState(() => localStorage.getItem("palm_api_key") || "");
+      const [showApiKey, setShowApiKey] = useState(false);
+      const [image, setImage] = useState(null);
+      const [imageBase64, setImageBase64] = useState(null);
+      const [imageMime, setImageMime] = useState("image/jpeg");
+      const [result, setResult] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [dragOver, setDragOver] = useState(false);
+      const fileRef = useRef();
+
+      const saveApiKey = (key) => {
+        setApiKey(key);
+        localStorage.setItem("palm_api_key", key);
+      };
+
+      const processFile = useCallback((file) => {
+        if (!file || !file.type.startsWith("image/")) return;
+        setImageMime(file.type || "image/jpeg");
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          setImage(e.target.result);
+          setImageBase64(e.target.result.split(",")[1]);
+          setResult(null);
+          setError(null);
+        };
+        reader.readAsDataURL(file);
+      }, []);
+
+      const handleDrop = (e) => {
+        e.preventDefault();
+        setDragOver(false);
+        processFile(e.dataTransfer.files[0]);
+      };
+
+      const analyze = async () => {
+        if (!imageBase64 || !apiKey.trim()) {
+          setError("API 키를 먼저 입력해 주세요.");
+          return;
+        }
+        setLoading(true);
+        setResult(null);
+        setError(null);
+        try {
+          const res = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": apiKey.trim(),
+              "anthropic-version": "2023-06-01",
+              "anthropic-dangerous-direct-browser-access": "true",
+            },
+            body: JSON.stringify({
+              model: "claude-opus-4-5",
+              max_tokens: 1200,
+              system: SYSTEM_PROMPT,
+              messages: [{
+                role: "user",
+                content: [
+                  { type: "image", source: { type: "base64", media_type: imageMime, data: imageBase64 } },
+                  { type: "text", text: "이 손바닥 사진의 손금을 자세히 해석해 주세요." }
+                ]
+              }]
+            })
+          });
+          const data = await res.json();
+          if (data.error) throw new Error(data.error.message);
+          const text = data.content?.find(b => b.type === "text")?.text;
+          if (!text) throw new Error("응답을 받지 못했습니다.");
+          setResult(text);
+        } catch (err) {
+          setError(err.message || "분석 중 오류가 발생했습니다.");
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const formatResult = (text) => {
+        return text.split("\n").map((line, i) => {
+          if (!line.trim()) return React.createElement("br", { key: i });
+          const isBold = line.includes("**");
+          const formatted = line.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+          return React.createElement("p", {
+            key: i,
+            dangerouslySetInnerHTML: { __html: formatted },
+            style: {
+              margin: "0.5rem 0",
+              lineHeight: 1.8,
+              color: isBold ? "#f0d98a" : "#d4c5a0",
+              fontSize: isBold ? "1rem" : "0.93rem",
+            }
+          });
+        });
+      };
+
+      return (
+        <div style={{ position: "relative", minHeight: "100vh" }}>
+          {/* 파티클 배경 */}
+          {particles.map(p => (
+            <div key={p.id} className="particle" style={{
+              width: p.size, height: p.size,
+              background: `rgba(212,175,55,${p.opacity})`,
+              left: `${p.left}%`, top: `${p.top}%`,
+              animation: `float ${p.duration}s ease-in-out infinite`,
+              animationDelay: `${p.delay}s`,
+            }} />
+          ))}
+
+          <div style={{
+            minHeight: "100vh",
+            background: "radial-gradient(ellipse at 20% 50%, #1a0d2e 0%, #0a0710 50%, #0d1a0a 100%)",
+            fontFamily: "'Nanum Myeongjo', serif",
+            position: "relative",
+            zIndex: 1,
+            padding: "2rem 1rem",
+          }}>
+
+            {/* 헤더 */}
+            <div style={{ textAlign: "center", marginBottom: "2.5rem" }}>
+              <div className="orb" style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                width: 80, height: 80, borderRadius: "50%",
+                background: "radial-gradient(circle, #2d1f5e, #1a0d2e)",
+                border: "2px solid #d4af37",
+                marginBottom: "1rem", fontSize: 36,
+              }}>🔮</div>
+              <h1 style={{
+                fontFamily: "'Cinzel', serif",
+                fontSize: "clamp(1.6rem, 5vw, 2.4rem)",
+                background: "linear-gradient(90deg, #c9a227, #f0d98a, #c9a227)",
+                backgroundSize: "200% auto",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                animation: "shimmer 4s linear infinite",
+                letterSpacing: "0.05em",
+                marginBottom: "0.4rem",
+              }}>손금 해석</h1>
+              <p style={{ color: "#8a7a9a", fontSize: "0.85rem", letterSpacing: "0.1em" }}>
+                PALM READING · 운명의 손금을 읽다
+              </p>
+              <div style={{ width: 60, height: 1, background: "linear-gradient(90deg, transparent, #d4af37, transparent)", margin: "1rem auto 0" }} />
+            </div>
+
+            <div style={{ maxWidth: 520, margin: "0 auto" }}>
+
+              {/* API Key 입력 */}
+              <div style={{
+                marginBottom: "1.2rem",
+                padding: "1rem 1.2rem",
+                background: "rgba(15,8,30,0.7)",
+                border: "1px solid #2d1f4e",
+                borderRadius: 14,
+                backdropFilter: "blur(10px)",
+              }}>
+                <label style={{ color: "#8a7a9a", fontSize: "0.78rem", letterSpacing: "0.08em", display: "block", marginBottom: "0.5rem" }}>
+                  🔑 ANTHROPIC API KEY
+                </label>
+                <div style={{ position: "relative" }}>
+                  <input
+                    className="api-input"
+                    type={showApiKey ? "text" : "password"}
+                    value={apiKey}
+                    onChange={e => saveApiKey(e.target.value)}
+                    placeholder="sk-ant-api03-..."
+                    style={{ paddingRight: "3rem" }}
+                  />
+                  <button onClick={() => setShowApiKey(!showApiKey)} style={{
+                    position: "absolute", right: "0.7rem", top: "50%", transform: "translateY(-50%)",
+                    background: "none", border: "none", cursor: "pointer", color: "#5a4a7a", fontSize: "0.9rem",
+                  }}>{showApiKey ? "🙈" : "👁️"}</button>
+                </div>
+                <p style={{ color: "#3d2d5e", fontSize: "0.72rem", marginTop: "0.4rem" }}>
+                  API 키는 브라우저 localStorage에만 저장됩니다 · <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{ color: "#5a4a7a" }}>키 발급 →</a>
+                </p>
+              </div>
+
+              {/* 업로드 존 */}
+              <div
+                className="upload-zone"
+                onDrop={handleDrop}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onClick={() => fileRef.current.click()}
+                style={{
+                  border: `2px dashed ${dragOver ? "#d4af37" : "#3d2d5e"}`,
+                  borderRadius: 16,
+                  padding: image ? "1rem" : "2.5rem 1.5rem",
+                  textAlign: "center",
+                  cursor: "pointer",
+                  transition: "all 0.3s ease",
+                  background: dragOver ? "rgba(212,175,55,0.05)" : "rgba(20,12,40,0.6)",
+                  backdropFilter: "blur(10px)",
+                }}>
+                <input ref={fileRef} type="file" accept="image/*" capture="environment"
+                  style={{ display: "none" }} onChange={e => processFile(e.target.files[0])} />
+
+                {image ? (
+                  <div>
+                    <img src={image} alt="palm" style={{
+                      width: "100%", maxHeight: 280, objectFit: "contain",
+                      borderRadius: 10, border: "1px solid #3d2d5e",
+                    }} />
+                    <p style={{ color: "#8a7a9a", fontSize: "0.8rem", marginTop: "0.7rem" }}>
+                      다른 사진으로 변경하려면 탭하세요
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 48, marginBottom: "1rem" }}>🖐️</div>
+                    <p style={{ color: "#c9a227", fontSize: "1rem", marginBottom: "0.5rem", fontFamily: "'Cinzel', serif" }}>
+                      손바닥 사진 업로드
+                    </p>
+                    <p style={{ color: "#5a4a7a", fontSize: "0.82rem", lineHeight: 1.6 }}>
+                      사진을 드래그하거나 탭하여 선택<br />카메라로 직접 촬영도 가능합니다
+                    </p>
+                    <div style={{ marginTop: "1.2rem", display: "flex", gap: "0.6rem", justifyContent: "center", flexWrap: "wrap" }}>
+                      {["💡 밝은 곳", "✋ 자연스럽게 펼치기", "📐 정면 촬영"].map(tip => (
+                        <span key={tip} style={{
+                          fontSize: "0.72rem", color: "#5a4a7a",
+                          background: "rgba(212,175,55,0.05)",
+                          border: "1px solid #2d1f4e",
+                          borderRadius: 20, padding: "0.25rem 0.7rem",
+                        }}>{tip}</span>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* 분석 버튼 */}
+              {image && !loading && (
+                <button className="analyze-btn" onClick={analyze} style={{
+                  width: "100%", marginTop: "1.2rem", padding: "0.9rem",
+                  background: "linear-gradient(135deg, #2d1f5e, #1a0d2e)",
+                  border: "1px solid #d4af37", borderRadius: 12,
+                  color: "#f0d98a", fontFamily: "'Cinzel', serif",
+                  fontSize: "1rem", letterSpacing: "0.1em",
+                  cursor: "pointer", transition: "all 0.3s ease",
+                  boxShadow: "0 4px 20px rgba(212,175,55,0.2)",
+                }}>
+                  ✨ 운명의 선을 읽어드립니다
+                </button>
+              )}
+
+              {/* 로딩 */}
+              {loading && (
+                <div style={{
+                  marginTop: "1.5rem", padding: "2rem",
+                  background: "rgba(20,12,40,0.8)",
+                  border: "1px solid #3d2d5e", borderRadius: 16,
+                  textAlign: "center", backdropFilter: "blur(10px)",
+                }}>
+                  <div style={{
+                    width: 50, height: 50,
+                    border: "3px solid #2d1f5e",
+                    borderTop: "3px solid #d4af37",
+                    borderRadius: "50%",
+                    animation: "spin-slow 1s linear infinite",
+                    margin: "0 auto 1rem",
+                  }} />
+                  <p style={{ color: "#c9a227", fontFamily: "'Cinzel', serif", fontSize: "0.9rem" }}>손금을 읽는 중...</p>
+                  <p style={{ color: "#5a4a7a", fontSize: "0.78rem", marginTop: "0.4rem" }}>운명의 선을 해석하고 있습니다</p>
+                </div>
+              )}
+
+              {/* 에러 */}
+              {error && (
+                <div style={{
+                  marginTop: "1.2rem", padding: "1rem",
+                  background: "rgba(100,20,20,0.3)",
+                  border: "1px solid #8b2020",
+                  borderRadius: 12, color: "#ff9090", fontSize: "0.85rem",
+                }}>⚠️ {error}</div>
+              )}
+
+              {/* 결과 */}
+              {result && (
+                <div style={{
+                  marginTop: "1.5rem",
+                  background: "rgba(15,8,30,0.9)",
+                  border: "1px solid #3d2d5e", borderRadius: 16,
+                  overflow: "hidden", backdropFilter: "blur(10px)",
+                  animation: "fadeIn 0.6s ease",
+                  boxShadow: "0 0 40px rgba(100,50,200,0.15)",
+                }}>
+                  <div style={{
+                    padding: "1rem 1.3rem",
+                    background: "linear-gradient(90deg, #1a0d2e, #2d1f5e, #1a0d2e)",
+                    borderBottom: "1px solid #3d2d5e",
+                    display: "flex", alignItems: "center", gap: "0.6rem",
+                  }}>
+                    <span style={{ fontSize: 20 }}>🔮</span>
+                    <span style={{ fontFamily: "'Cinzel', serif", color: "#f0d98a", fontSize: "0.95rem", letterSpacing: "0.08em" }}>
+                      손금 해석 결과
+                    </span>
+                  </div>
+                  <div style={{ padding: "1.3rem" }}>
+                    {formatResult(result)}
+                  </div>
+                </div>
+              )}
+
+              <p style={{
+                textAlign: "center", color: "#3d2d5e",
+                fontSize: "0.72rem", marginTop: "2rem", lineHeight: 1.6,
+              }}>
+                이 앱은 재미와 흥미를 위한 손금 해석 서비스입니다<br />
+                과학적 근거를 갖춘 서비스가 아님을 안내드립니다
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(React.createElement(App));
+  </script>
+</body>
+</html>
